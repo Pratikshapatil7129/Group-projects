@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User public profiles",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The Firebase User ID" },
+        "displayName": { "type": "string", "description": "The user's display name" },
+        "email": { "type": "string", "description": "The user's email address" },
+        "photoURL": { "type": "string", "description": "URL to the user's profile image" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Representative schema for collaborative projects",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "description": "Unique identifier of the project" },
+        "name": { "type": "string", "description": "Name of the project" },
+        "description": { "type": "string", "description": "Description of the project" },
+        "ownerId": { "type": "string", "description": "UserId of the creator / owner" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "name", "ownerId", "createdAt", "updatedAt"]
+    },
+    "ProjectMember": {
+      "title": "ProjectMember",
+      "description": "Users who are members of the parent project",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user" },
+        "role": { "type": "string", "enum": ["owner", "member"] },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "addedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task or card inside a project board",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "columnId": { "type": "string", "description": "The current lane/column: e.g. todo, in_progress, done" },
+        "assigneeId": { "type": "string", "description": "UID of assignee" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "projectId", "title", "columnId", "createdAt", "updatedAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comments left on tasks within a project",
+      "type": "object",
+      "properties": {
+        "commentId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["commentId", "taskId", "authorId", "authorName", "text", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app real-time notification records",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string" },
+        "userId": { "type": "string", "description": "Recipient userId" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["task_assigned", "new_comment", "project_invite"] },
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["notificationId", "userId", "title", "message", "type", "projectId", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "The user registry containing public profile metadata"
+    },
+    "projects": {
+      "schema": "Project",
+      "description": "Collaborative project objects"
+    },
+    "projects/{projectId}/members": {
+      "schema": "ProjectMember",
+      "description": "Members assigned to a project"
+    },
+    "projects/{projectId}/tasks": {
+      "schema": "Task",
+      "description": "Tasks or task cards that belong to a project"
+    },
+    "projects/{projectId}/tasks/{taskId}/comments": {
+      "schema": "Comment",
+      "description": "Communications and discussions on tasks"
+    },
+    "users/{userId}/notifications": {
+      "schema": "Notification",
+      "description": "Direct communication channel notifications"
+    }
+  }
+}

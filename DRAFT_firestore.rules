@@ -1,0 +1,178 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY PRIMITIVES ---
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Parent relationship verification (Master Gate)
+    function isMember(projectId) {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/projects/$(projectId)/members/$(request.auth.uid))
+      );
+    }
+
+    // --- SCHEMA VALIDATION HELPERS ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'displayName', 'email', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 6
+        && data.userId is string && data.userId.size() <= 128
+        && data.displayName is string && data.displayName.size() <= 100
+        && data.email is string && data.email.size() <= 200
+        && data.photoURL is string && data.photoURL.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['projectId', 'name', 'description', 'ownerId', 'memberUids', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 7
+        && isValidId(data.projectId)
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.description is string && data.description.size() <= 1000
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.memberUids is list && data.memberUids.size() <= 20
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProjectMember(data) {
+      return data.keys().hasAll(['userId', 'role', 'addedAt'])
+        && data.keys().size() == 3
+        && data.userId is string && data.userId.size() <= 128
+        && data.role is string && (data.role == 'owner' || data.role == 'member')
+        && data.addedAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['taskId', 'projectId', 'title', 'description', 'columnId', 'assigneeId', 'priority', 'dueDate', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 10
+        && isValidId(data.taskId)
+        && isValidId(data.projectId)
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.columnId is string && data.columnId.size() <= 50
+        && data.assigneeId is string && data.assigneeId.size() <= 128
+        && data.priority is string && (data.priority == 'low' || data.priority == 'medium' || data.priority == 'high')
+        && (data.dueDate is string || data.dueDate == null)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['commentId', 'taskId', 'authorId', 'authorName', 'authorPhoto', 'text', 'createdAt'])
+        && data.keys().size() == 7
+        && isValidId(data.commentId)
+        && isValidId(data.taskId)
+        && data.authorId is string && data.authorId.size() <= 128
+        && data.authorName is string && data.authorName.size() <= 100
+        && data.authorPhoto is string && data.authorPhoto.size() <= 2000
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['notificationId', 'userId', 'title', 'message', 'type', 'projectId', 'taskId', 'read', 'createdAt'])
+        && data.keys().size() == 9
+        && isValidId(data.notificationId)
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.message is string && data.message.size() <= 1000
+        && data.type is string && (data.type == 'task_assigned' || data.type == 'new_comment' || data.type == 'project_invite')
+        && isValidId(data.projectId)
+        && (isValidId(data.taskId) || data.taskId == '')
+        && data.read is bool
+        && data.createdAt is timestamp;
+    }
+
+    // --- MATCH BLOCKS ---
+
+    // 1. Users registry
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isVerifiedUser() && request.auth.uid == userId && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && request.auth.uid == userId && isValidUser(incoming()) && incoming().updatedAt == request.time && incoming().userId == existing().userId && incoming().email == existing().email && incoming().createdAt == existing().createdAt && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt'])
+      );
+    }
+
+    // 2. Projects
+    match /projects/{projectId} {
+      allow get: if isMember(projectId);
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.memberUids.hasAny([request.auth.uid]));
+      allow create: if isVerifiedUser() && isValidId(projectId) && isValidProject(incoming()) && incoming().projectId == projectId && incoming().ownerId == request.auth.uid && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isMember(projectId) && isValidProject(incoming()) && incoming().updatedAt == request.time && incoming().projectId == existing().projectId && incoming().ownerId == existing().ownerId && incoming().createdAt == existing().createdAt && (
+        (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'memberUids', 'updatedAt'])) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']))
+      );
+      allow delete: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+    }
+
+    // 3. Project Members Subcollection
+    match /projects/{projectId}/members/{userId} {
+      allow read: if isMember(projectId);
+      allow create: if isVerifiedUser() && isValidId(userId) && isValidProjectMember(incoming()) && incoming().userId == userId && (
+        get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+        request.auth.uid == userId
+      );
+      allow delete: if isVerifiedUser() && (
+        get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid ||
+        request.auth.uid == userId
+      );
+    }
+
+    // 4. Tasks Subcollection
+    match /projects/{projectId}/tasks/{taskId} {
+      allow read: if isMember(projectId);
+      allow create: if isVerifiedUser() && isValidId(taskId) && isMember(projectId) && isValidTask(incoming()) && incoming().taskId == taskId && incoming().projectId == projectId && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isMember(projectId) && isValidTask(incoming()) && incoming().updatedAt == request.time && incoming().taskId == existing().taskId && incoming().projectId == existing().projectId && incoming().createdAt == existing().createdAt && (
+        incoming().diff(existing()).affectedKeys().hasAny(['title', 'description', 'columnId', 'assigneeId', 'priority', 'dueDate', 'updatedAt'])
+      );
+      allow delete: if isVerifiedUser() && isMember(projectId);
+    }
+
+    // 5. Task Comments
+    match /projects/{projectId}/tasks/{taskId}/comments/{commentId} {
+      allow read: if isMember(projectId);
+      allow create: if isVerifiedUser() && isValidId(commentId) && isMember(projectId) && isValidComment(incoming()) && incoming().commentId == commentId && incoming().taskId == taskId && incoming().authorId == request.auth.uid && incoming().createdAt == request.time;
+      allow delete, update: if isVerifiedUser() && isMember(projectId) && existing().authorId == request.auth.uid;
+    }
+
+    // 6. User Notifications
+    match /users/{userId}/notifications/{notificationId} {
+      allow read: if isVerifiedUser() && request.auth.uid == userId;
+      allow create: if isVerifiedUser() && isValidId(notificationId) && isValidNotification(incoming()) && incoming().notificationId == notificationId && (
+        request.auth.uid == userId ||
+        isMember(incoming().projectId)
+      );
+      allow update: if isVerifiedUser() && request.auth.uid == userId && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['read'])
+      );
+      allow delete: if isVerifiedUser() && request.auth.uid == userId;
+    }
+  }
+}

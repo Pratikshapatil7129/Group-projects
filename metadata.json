@@ -1,0 +1,6 @@
+{
+  "name": "Project Board Tool",
+  "description": "A collaborative real-time project management board similar to Trello or Asana, permitting users to create group projects, assign task cards, and communicate in real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
